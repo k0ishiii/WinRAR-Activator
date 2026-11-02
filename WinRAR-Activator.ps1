@@ -1,13 +1,4 @@
 #Requires -Version 5.1
-<#
-.SYNOPSIS
-    WinRAR Activator - Version 2.2
-.DESCRIPTION
-    Advanced self-contained PowerShell utility supporting both local execution
-    and instant remote execution via command line one-liner.
-    Author  : k0ishiii
-    Discord : misakisakura3
-#>
 
 [CmdletBinding()]
 param(
@@ -88,12 +79,14 @@ function Invoke-Spinner {
 
 function Pause-IfInteractive {
     if ($NoPause) { return }
-    if ([Environment]::UserInteractive) {
-        Write-Host ''
-        Write-Host '  ==========================================================================' -ForegroundColor DarkGray
-        Write-Host '   Press any key to exit the activator window...' -ForegroundColor White
-        Write-Host '  ==========================================================================' -ForegroundColor DarkGray
-        try { [void]$Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown') } catch { Start-Sleep -Seconds 3 }
+    Write-Host ''
+    Write-Host '  ==========================================================================' -ForegroundColor DarkGray
+    Write-Host '   Press ENTER to exit the activator window...' -ForegroundColor White
+    Write-Host '  ==========================================================================' -ForegroundColor DarkGray
+    try {
+        [void][System.Console]::ReadLine()
+    } catch {
+        Start-Sleep -Seconds 3
     }
 }
 

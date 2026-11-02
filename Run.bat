@@ -2,7 +2,7 @@
 setlocal enabledelayedexpansion
 
 chcp 65001 >nul
-title WinRAR Activator v2.2 Launcher
+title WinRAR Activator v2.2
 
 if not exist "%~dp0WinRAR-Activator.ps1" (
     color 0C
@@ -30,3 +30,4 @@ if %errorlevel% equ 0 (
 "%PS_EXEC%" -NoProfile -ExecutionPolicy Bypass -File "%~dp0WinRAR-Activator.ps1" -Theme Purple
 
 endlocal
+exit /b %errorlevel%
