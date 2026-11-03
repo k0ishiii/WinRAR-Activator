@@ -13,7 +13,7 @@ $ErrorActionPreference = 'Stop'
 $ProgressPreference    = 'SilentlyContinue'
 
 $script:AppTitle   = 'WinRAR Activator'
-$script:AppVersion = 'v2.2'
+$script:AppVersion = 'v2.3'
 $script:Author     = 'k0ishiii'
 $script:Discord    = 'misakisakura3'
 
@@ -165,6 +165,28 @@ function Resolve-WinRARPath {
             return $p
         }
     }
+
+    $regPaths = @(
+        'Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\WinRAR.exe',
+        'Registry::HKEY_LOCAL_MACHINE\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\App Paths\WinRAR.exe'
+    )
+    foreach ($regPath in $regPaths) {
+        if (Test-Path $regPath) {
+            try {
+                $val = (Get-ItemProperty -Path $regPath -Name '(default)' -ErrorAction SilentlyContinue).'(default)'
+                if (-not $val) {
+                    $val = (Get-ItemProperty -Path $regPath -ErrorAction SilentlyContinue).'(default)'
+                }
+                if ($val) {
+                    $dir = [System.IO.Path]::GetDirectoryName($val)
+                    if ($dir -and (Test-Path (Join-Path $dir 'WinRAR.exe'))) {
+                        return $dir
+                    }
+                }
+            } catch { }
+        }
+    }
+
     return $null
 }
 
@@ -263,24 +285,45 @@ function Set-RarRegKey {
         }
 
         Write-Step 'Deploying self-healing license payload...'
-        try {
-            $content = ($script:RarRegKey -split "`r?`n") -join "`r`n"
-            [System.IO.File]::WriteAllText($target, $content, (New-Object System.Text.UTF8Encoding($false)))
-        } catch {
-            Write-Fail ('Failed to write license file: {0}' -f $_.Exception.Message)
+        $success = $false
+        for ($retry = 1; $retry -le 3; $retry++) {
+            try {
+                $content = ($script:RarRegKey -split "`r?`n") -join "`r`n"
+                [System.IO.File]::WriteAllText($target, $content, (New-Object System.Text.UTF8Encoding($false)))
+                $success = $true
+                break
+            } catch {
+                Start-Sleep -Milliseconds 250
+            }
+        }
+        if (-not $success) {
+            Write-Fail 'Failed to write license file after multiple attempts.'
             return $false
         }
     }
 
-    Write-Step 'Applying NTFS read-only hardening to prevent overwrites...'
-    try {
-        Set-ItemProperty -LiteralPath $target -Name Attributes -Value 'ReadOnly' -ErrorAction Stop
-        $acl = Get-Acl $target
-        $rule = New-Object System.Security.AccessControl.FileSystemAccessRule("Users", "Write, Delete", "Deny")
-        $acl.AddAccessRule($rule)
-        Set-Acl $target $acl -ErrorAction SilentlyContinue
+    Write-Step 'Applying universal NTFS read-only hardening...'
+    $hardened = $false
+    for ($retry = 1; $retry -le 3; $retry++) {
+        try {
+            Set-ItemProperty -LiteralPath $target -Name Attributes -Value 'ReadOnly' -ErrorAction Stop
+            $acl = Get-Acl $target
+            $sid = New-Object System.Security.Principal.SecurityIdentifier("S-1-5-32-545")
+            $rule = New-Object System.Security.AccessControl.FileSystemAccessRule($sid, "Write, Delete", "Deny")
+            $acl.AddAccessRule($rule)
+            Set-Acl $target $acl -ErrorAction Stop
+            $hardened = $true
+            break
+        } catch {
+            Start-Sleep -Milliseconds 250
+        }
+    }
+
+    if ($hardened) {
         Write-Ok 'License protected against unauthorized system modifications.'
-    } catch { }
+    } else {
+        Write-Warn 'License deployed, but NTFS hardening encountered minor restrictions.'
+    }
 
     if (-not (Test-Path -LiteralPath $target -PathType Leaf)) {
         Write-Fail 'Post-verification failed: License file missing.'
@@ -303,7 +346,7 @@ function Invoke-Main {
     Write-Step 'Scanning system for WinRAR installation...'
     $rarDir = Resolve-WinRARPath
     if (-not $rarDir) {
-        Write-Fail 'WinRAR installation not found in standard directories. Please install it first.'
+        Write-Fail 'WinRAR installation not found. Please install it first.'
         Pause-IfInteractive
         exit 2
     }
@@ -346,7 +389,7 @@ function Invoke-Main {
 
     Write-Host ''
     Write-Host "  ==========================================================================" -ForegroundColor DarkGray
-    Write-Ok ' ACTIVATION COMPLETED SUCCESSFULLY (v2.2)! Enjoy your registered WinRAR.'
+    Write-Ok ' ACTIVATION COMPLETED SUCCESSFULLY (v2.3)! Enjoy your registered WinRAR.'
     Write-Host "  ==========================================================================" -ForegroundColor DarkGray
     Pause-IfInteractive
 }

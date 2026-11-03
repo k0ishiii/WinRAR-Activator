@@ -1,74 +1,76 @@
 <div align="center">
 
-# WinRAR Activator v2.2
+# WinRAR Activator
 
-> **A premium, ultra-lightweight, and fully autonomous utility to seamlessly apply and manage your WinRAR registration license.**
+> **A minimal, zero-friction utility engineered to effortlessly manage and protect your WinRAR registration.**
 
 [![PowerShell Version](https://img.shields.io/badge/PowerShell-5.1%2B%20%7C%207%2B-blue.svg?style=for-the-badge&logo=powershell&logoColor=white)](https://github.com/PowerShell/PowerShell)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20x64%2F32-lightgrey.svg?style=for-the-badge&logo=windows&logoColor=white)](https://www.win-rar.com/)
-[![Author](https://img.shields.io/badge/Author-k0ishiii-yellow.svg?style=for-the-badge&logo=github&logoColor=white)](https://github.com/k0ishiii)
+[![Version](https://img.shields.io/badge/Version-v2.3-purple.svg?style=for-the-badge)](https://github.com/k0ishiii/WinRAR-Activator)
 [![License](https://img.shields.io/badge/License-MIT-green.svg?style=for-the-badge)](./LICENSE)
 
 </div>
 
 ---
 
-## 💎 Overview
+## Overview
 
-**WinRAR Activator v2.2** is an enterprise-grade utility engineered to automate the deployment, protection, and maintenance of your WinRAR license with absolute zero friction. Built on a robust modular architecture, it features deep process termination, silent workspace cache purging, NTFS file permission hardening, and real-time self-healing integrity verification.
+**WinRAR Activator v2.3** is a lightweight, fully autonomous automation tool designed for seamless deployment and persistent protection of the WinRAR registration license.
 
----
-
-## ✨ Core Architecture & Features
-
-* **⚡ Dual Engine Support**: Dynamically targets PowerShell 7 with seamless automatic fallback to Windows PowerShell 5.1.
-* **🔍 Precision Discovery**: Automatically scans standard installation directories and PE headers to precisely match system architecture (`x64` / `x86`).
-* **🛑 Deep Process Termination**: Force-clears all active instances and system tray leftovers (`rar`, `unrar`, `winrar`) prior to execution.
-* **🛡️ Self-Healing Engine**: Validates existing license integrity on startup, preventing redundant modifications and ensuring constant stability.
-* **🔒 NTFS Hardening**: Secures `rarreg.key` with strict read-only attributes and access control rules to block unauthorized system overwrites.
-* **🧹 Silent Cleanup**: Automatically sweeps away temporary workspace remnants and installation artifacts in total background silence.
-* **🎨 Modern Terminal UI**: Clean ASCII banner layout featuring real-time status spinner animations and customizable color themes.
+Built with performance and safety in mind, it combines universal path discovery, non-disruptive process handling, automated workspace cleanup, and hardware-agnostic permission hardening—delivering a refined, single-command experience.
 
 ---
 
-## 🚀 Quick Start & Installation
+## Core Capabilities
 
-Choose your preferred method to deploy the activator. *(Note: Manual administrator elevation is optional, as the script handles UAC self-elevation automatically).*
+* **Dual-Engine Execution**: Dynamically targets PowerShell 7 (`pwsh`) with seamless fallback to Windows PowerShell 5.1.
+* **Universal Registry Discovery**: Scans environment variables, Scoop installations, and system registry paths (`App Paths`) to locate WinRAR under any custom directory.
+* **SID-Based Hardening**: Applies universal NTFS access control rules using security identifiers (`S-1-5-32-545`), guaranteeing cross-language OS compatibility.
+* **Self-Healing License Engine**: Evaluates existing license integrity prior to payload execution to eliminate redundant writes.
+* **Fault-Tolerant Retry Logic**: Employs millisecond-level retry loops during critical file operations to prevent software lockouts or antivirus interference.
+* **Process & Workspace Cleanup**: Gracefully terminates background processes (`rar`, `unrar`, `winrar`) and sweeps away temporary installation artifacts.
 
-### Method 1: Instant Remote Execution (Fastest)
-Open any standard **PowerShell** window and execute the following command:
+---
+
+## Quick Start
+
+You can deploy the utility via remote command or traditional local script execution. Manual administrator elevation is handled automatically if required.
+
+### Remote Execution (Recommended)
+
+Run the following command inside a standard **PowerShell** prompt:
 
 ```powershell
 irm "https://raw.githubusercontent.com/k0ishiii/WinRAR-Activator/main/WinRAR-Activator.ps1" | iex
 ```
 
-### Method 2: Classic Local Execution
+### Local Execution
 
-1. Download or clone this repository to your local machine.
-2. Ensure both `Run.bat` and `WinRAR-Activator.ps1` reside in the same folder.
-3. Double-click `Run.bat` to launch.
+1. Clone or download this repository.
+2. Ensure both `Run.bat` and `WinRAR-Activator.ps1` are located in the same directory.
+3. Launch `Run.bat`.
 
 ---
 
-## 📂 Project Structure
+## Architecture
 
 ```text
 WinRAR-Activator/
-├── Run.bat               # Intelligent local environment launcher
-├── WinRAR-Activator.ps1  # Core PowerShell automation & self-healing engine
-└── README.md             # Official project documentation
+├── Run.bat               # Environment bootstrap launcher
+├── WinRAR-Activator.ps1  # Core engine & self-healing framework
+└── README.md             # Project documentation
 
 ```
 
 ---
 
-## 👤 Author & Credits
+## Developer Info
 
 * **Author**: `k0ishiii`
 * **Discord**: `misakisakura3`
 
 ---
 
-## 📜 License
+## License
 
-This project is open-source and distributed under the terms of the **MIT License**. Check the [LICENSE](https://www.google.com/search?q=./LICENSE) file for full details.
+This project is licensed under the terms of the **MIT License**. Refer to [LICENSE](https://www.google.com/search?q=./LICENSE) for full details.
