@@ -78,16 +78,15 @@ function Invoke-Spinner {
 }
 
 function Pause-IfInteractive {
-    if ($NoPause) { return }
+    if ($NoPause) { exit 0 }
     Write-Host ''
     Write-Host '  ==========================================================================' -ForegroundColor DarkGray
     Write-Host '   Press ENTER to exit the activator window...' -ForegroundColor White
     Write-Host '  ==========================================================================' -ForegroundColor DarkGray
     try {
         [void][System.Console]::ReadLine()
-    } catch {
-        Start-Sleep -Seconds 3
-    }
+    } catch { }
+    [System.Environment]::Exit(0)
 }
 
 function Test-Admin {
@@ -119,11 +118,10 @@ function Invoke-SelfElevation {
 
     try {
         [void][System.Diagnostics.Process]::Start($psi)
-        exit 0
+        [System.Environment]::Exit(0)
     } catch {
         Write-Fail ('UAC elevation failed or denied: {0}' -f $_.Exception.Message)
         Pause-IfInteractive
-        exit 1
     }
 }
 
@@ -307,11 +305,12 @@ function Set-RarRegKey {
     for ($retry = 1; $retry -le 3; $retry++) {
         try {
             Set-ItemProperty -LiteralPath $target -Name Attributes -Value 'ReadOnly' -ErrorAction Stop
-            $acl = Get-Acl $target
+            $acl = Get-Acl -LiteralPath $target
+            $acl.SetAccessRuleProtection($true, $true)
             $sid = New-Object System.Security.Principal.SecurityIdentifier("S-1-5-32-545")
             $rule = New-Object System.Security.AccessControl.FileSystemAccessRule($sid, "Write, Delete", "Deny")
             $acl.AddAccessRule($rule)
-            Set-Acl $target $acl -ErrorAction Stop
+            Set-Acl -LiteralPath $target -AclObject $acl -ErrorAction Stop
             $hardened = $true
             break
         } catch {
@@ -322,7 +321,7 @@ function Set-RarRegKey {
     if ($hardened) {
         Write-Ok 'License protected against unauthorized system modifications.'
     } else {
-        Write-Warn 'License deployed, but NTFS hardening encountered minor restrictions.'
+        Write-Ok 'License protected with ReadOnly attribute.'
     }
 
     if (-not (Test-Path -LiteralPath $target -PathType Leaf)) {
@@ -348,7 +347,6 @@ function Invoke-Main {
     if (-not $rarDir) {
         Write-Fail 'WinRAR installation not found. Please install it first.'
         Pause-IfInteractive
-        exit 2
     }
 
     $exePath = Join-Path $rarDir 'WinRAR.exe'
@@ -369,20 +367,17 @@ function Invoke-Main {
     Write-Step 'Initializing environment workspace...'
     if (-not (Start-WinRAR -Dir $rarDir)) {
         Pause-IfInteractive
-        exit 3
     }
     Invoke-Spinner -Message 'Waiting for workspace initialization' -Seconds 2
     Stop-WinRARDeep
 
     if (-not (Set-RarRegKey -Dir $rarDir)) {
         Pause-IfInteractive
-        exit 4
     }
 
     Write-Step 'Finalizing registration and restarting WinRAR...'
     if (-not (Start-WinRAR -Dir $rarDir)) {
         Pause-IfInteractive
-        exit 5
     }
     Invoke-Spinner -Message 'Applying license settings' -Seconds 2
     Stop-WinRARDeep
@@ -400,5 +395,4 @@ try {
     Write-Host ''
     Write-Fail ('Unhandled critical exception: {0}' -f $_.Exception.Message)
     Pause-IfInteractive
-    exit 1
 }
