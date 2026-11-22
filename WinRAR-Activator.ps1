@@ -4,7 +4,11 @@
 param(
     [switch]$NoPause,
 
-    # Internal: used only by the elevated child process to clean up the downloaded temp script.
+    # Internal: set only by Invoke-SelfElevation on the child process to signal
+    # that a UAC elevation was already attempted (anti-loop guard).
+    [switch]$Elevated,
+
+    # Internal: temp script path downloaded for elevated remote execution.
     [string]$TempScriptToCleanup = $null
 )
 
@@ -13,11 +17,10 @@ $ErrorActionPreference = 'Stop'
 $ProgressPreference    = 'SilentlyContinue'
 
 $script:AppTitle   = 'WinRAR Activator'
-$script:AppVersion = 'v2.4'
+$script:AppVersion = 'v2.4.1'
 $script:Author     = 'k0ishiii'
 $script:Discord    = 'misakisakura3'
 
-# Fixed color scheme (Purple theme).
 $script:ColPrimary = 'Magenta'
 $script:ColHeader  = 'Magenta'
 
@@ -63,8 +66,6 @@ function Invoke-Spinner {
         [int]$Seconds = 2
     )
 
-    # When stdout is not an interactive terminal, avoid carriage returns that would
-    # corrupt redirected logs. Emit clean single lines instead.
     if ([Console]::IsOutputRedirected) {
         Write-Host ("   [?] {0}..." -f $Message) -ForegroundColor DarkGray
         Start-Sleep -Seconds $Seconds
@@ -111,25 +112,29 @@ function Test-Admin {
 }
 
 function Invoke-SelfElevation {
-    Write-Warn 'Administrative privileges required. Requesting UAC elevation...'
-
     $psi = New-Object System.Diagnostics.ProcessStartInfo
     $psi.UseShellExecute = $true
     $psi.Verb = 'runas'
     $psi.WindowStyle = [System.Diagnostics.ProcessWindowStyle]::Normal
 
+    # NOTE: do NOT touch $psi.EnvironmentVariables when UseShellExecute = $true.
+    # In .NET Framework the getter initializes an internal field before throwing,
+    # and a later Process::Start re-throws with the same InvalidOperationException.
+    # The anti-loop flag is therefore forwarded via -Elevated instead.
+
     $tmpScript = $null
 
     if ($PSCommandPath -and (Test-Path -LiteralPath $PSCommandPath)) {
-        # Local execution: relaunch the exact same script file.
+        # Local execution: relaunch the same file with -Elevated.
         $psi.FileName = (Get-Process -Id $PID).Path
         $argList = @(
             '-NoProfile', '-ExecutionPolicy', 'Bypass',
-            '-File', ('"{0}"' -f $PSCommandPath)
+            '-File', ('"{0}"' -f $PSCommandPath),
+            '-Elevated'
         )
     } else {
-        # Remote execution (irm | iex): download to a temp .ps1 so parameters
-        # and the -File invocation are fully honoured by the elevated process.
+        # Remote execution (irm | iex): download to temp .ps1 so -File is used
+        # and parameters are honoured by the elevated child.
         try {
             $tmpScript = Join-Path $env:TEMP ("WinRAR-Activator-{0}.ps1" -f ([Guid]::NewGuid().ToString('N')))
             $url = 'https://raw.githubusercontent.com/k0ishiii/WinRAR-Activator/main/WinRAR-Activator.ps1'
@@ -152,20 +157,13 @@ function Invoke-SelfElevation {
         $argList = @(
             '-NoProfile', '-ExecutionPolicy', 'Bypass',
             '-File', ('"{0}"' -f $tmpScript),
+            '-Elevated',
             '-TempScriptToCleanup', ('"{0}"' -f $tmpScript)
         )
     }
 
     if ($NoPause) { $argList += '-NoPause' }
     $psi.Arguments = $argList -join ' '
-
-    # Anti-loop guard: mark current process env so the elevated child can detect
-    # that elevation was already attempted. If the child still reports non-admin,
-    # it will abort instead of spawning another UAC prompt indefinitely.
-    $env:_WINRAR_ACT_ELEVATED = '1'
-    try {
-        $psi.EnvironmentVariables['_WINRAR_ACT_ELEVATED'] = '1'
-    } catch { }
 
     try {
         [void][System.Diagnostics.Process]::Start($psi)
@@ -178,8 +176,6 @@ function Invoke-SelfElevation {
         return
     }
 
-    # The elevated child now owns the temp script and will delete it on exit
-    # through -TempScriptToCleanup.
     [System.Environment]::Exit(0)
 }
 
@@ -296,15 +292,12 @@ function Stop-WinRARDeep {
 }
 
 function Clear-WinRARCache {
-    # Temp: limit recursion depth so we never traverse unrelated user directories.
     try {
         $tempPath = [System.IO.Path]::GetTempPath()
         Get-ChildItem -Path $tempPath -Filter 'RarSFX*' -Depth 1 -ErrorAction SilentlyContinue |
             Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
     } catch { }
 
-    # VirtualStore: target only the two known WinRAR install locations instead of
-    # recursively walking the whole VirtualStore tree.
     try {
         $vsRoot = Join-Path $env:LocalAppData 'VirtualStore'
         if ($vsRoot -and (Test-Path -LiteralPath $vsRoot)) {
@@ -374,6 +367,30 @@ a638ec8aa57606488b324a1e71be06e54787b797df438679604ee6
 ------------------------------------------------------
 "@
 
+function Remove-UserDenyRules {
+    # Removes any existing Deny rule for BUILTIN\Users so the ReadOnly attribute
+    # (which needs WriteAttributes) can be set. Uses WriteDAC, not Write, so it
+    # works even when the previous deny rule is already in place.
+    param([string]$Path)
+    try {
+        $acl = Get-Acl -LiteralPath $Path
+        $usersSid = New-Object System.Security.Principal.SecurityIdentifier("S-1-5-32-545")
+        $toRemove = @()
+        foreach ($rule in $acl.Access) {
+            if ($rule.AccessControlType -ne [System.Security.AccessControl.AccessControlType]::Deny) { continue }
+            try {
+                $ruleSid = $rule.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier])
+                if ($ruleSid.Value -eq $usersSid.Value) { $toRemove += $rule }
+            } catch { }
+        }
+        if ($toRemove.Count -eq 0) { return }
+        foreach ($r in $toRemove) {
+            [void]$acl.RemoveAccessRule($r)
+        }
+        Set-Acl -LiteralPath $Path -AclObject $acl -ErrorAction Stop
+    } catch { }
+}
+
 function Set-RarRegKey {
     param([string]$Dir)
     $target = Join-Path $Dir 'rarreg.key'
@@ -431,7 +448,10 @@ function Set-RarRegKey {
 
     Write-Step 'Applying ReadOnly attribute and NTFS hardening...'
 
-    # --- ReadOnly attribute (independent from ACL) ---
+    # Clear prior deny rules that would block WriteAttributes on the ReadOnly flag.
+    Remove-UserDenyRules -Path $target
+
+    # --- ReadOnly attribute ---
     $readOnlyOk = $false
     for ($retry = 1; $retry -le 3; $retry++) {
         try {
@@ -443,7 +463,7 @@ function Set-RarRegKey {
         }
     }
 
-    # --- NTFS ACL hardening (independent from ReadOnly) ---
+    # --- NTFS ACL with specific rights (no WriteAttributes) ---
     $aclOk = $false
     $aclError = $null
     for ($retry = 1; $retry -le 3; $retry++) {
@@ -451,7 +471,10 @@ function Set-RarRegKey {
             $acl = Get-Acl -LiteralPath $target
             $acl.SetAccessRuleProtection($true, $true)
             $sid = New-Object System.Security.Principal.SecurityIdentifier("S-1-5-32-545")
-            $rule = New-Object System.Security.AccessControl.FileSystemAccessRule($sid, "Write, Delete", "Deny")
+            $specificRights = [System.Security.AccessControl.FileSystemRights]::WriteData -bor `
+                              [System.Security.AccessControl.FileSystemRights]::AppendData -bor `
+                              [System.Security.AccessControl.FileSystemRights]::Delete
+            $rule = New-Object System.Security.AccessControl.FileSystemAccessRule($sid, $specificRights, "Deny")
             $acl.AddAccessRule($rule)
             Set-Acl -LiteralPath $target -AclObject $acl -ErrorAction Stop
             $aclOk = $true
@@ -469,7 +492,7 @@ function Set-RarRegKey {
     }
 
     if ($aclOk) {
-        Write-Ok 'NTFS ACL hardening applied (BUILTIN\Users denied Write/Delete).'
+        Write-Ok 'NTFS ACL hardening applied (BUILTIN\Users denied Write/Append/Delete).'
     } else {
         Write-Warn ('NTFS ACL hardening not applied (non-NTFS volume or access denied): {0}' -f $aclError)
     }
@@ -484,19 +507,22 @@ function Set-RarRegKey {
 }
 
 function Invoke-Main {
-    Write-Banner
-
     if (-not (Test-Admin)) {
-        # Anti-loop guard: if we already attempted elevation and we are still
-        # not administrators, abort instead of spawning endless UAC prompts.
-        if ($env:_WINRAR_ACT_ELEVATED -eq '1') {
-            Write-Fail 'Elevation was already attempted, but Administrator role still not detected. Aborting to avoid UAC loop.'
+        # Anti-loop guard: if we were already spawned elevated but still do not
+        # satisfy the Administrator role, abort with a clear message instead of
+        # spawning another UAC prompt indefinitely.
+        if ($Elevated) {
+            Write-Banner
+            Write-Fail 'Elevation was attempted but Administrator role still not detected. Aborting to avoid a UAC loop.'
             Pause-IfInteractive
             return
         }
+        Write-Warn 'Administrative privileges required. Requesting UAC elevation...'
         Invoke-SelfElevation
         return
     }
+
+    Write-Banner
     Write-Ok 'Administrative privileges confirmed.'
 
     Write-Step 'Scanning system for WinRAR installation...'
@@ -541,7 +567,7 @@ function Invoke-Main {
 
     Write-Host ''
     Write-Host "  ==========================================================================" -ForegroundColor DarkGray
-    Write-Ok ' ACTIVATION COMPLETED SUCCESSFULLY (v2.4)! Enjoy your registered WinRAR.'
+    Write-Ok ' ACTIVATION COMPLETED SUCCESSFULLY (v2.4.1)! Enjoy your registered WinRAR.'
     Write-Host "  ==========================================================================" -ForegroundColor DarkGray
     Pause-IfInteractive
 }

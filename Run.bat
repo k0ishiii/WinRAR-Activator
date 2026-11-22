@@ -2,7 +2,7 @@
 setlocal enabledelayedexpansion
 
 chcp 65001 >nul
-title WinRAR Activator v2.4
+title WinRAR Activator v2.4.1
 
 cd /d "%~dp0"
 
