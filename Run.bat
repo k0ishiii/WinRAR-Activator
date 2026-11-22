@@ -2,14 +2,23 @@
 setlocal enabledelayedexpansion
 
 chcp 65001 >nul
-title WinRAR Activator v2.3
+title WinRAR Activator v2.4
 
 cd /d "%~dp0"
 
 net session >nul 2>&1
 if %errorlevel% neq 0 (
-    powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Process -FilePath '%~f0' -ArgumentList '%*' -Verb RunAs"
-    exit /b
+    set "ARGS="
+    for %%A in (%*) do (
+        if defined ARGS (set "ARGS=!ARGS!, '%%~A'") else (set "ARGS='%%~A'")
+    )
+    if defined ARGS (
+        powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Process -FilePath '%~f0' -ArgumentList @(!ARGS!) -Verb RunAs"
+    ) else (
+        powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Process -FilePath '%~f0' -Verb RunAs"
+    )
+    set "RC=%errorlevel%"
+    endlocal & exit /b %RC%
 )
 
 if not exist "WinRAR-Activator.ps1" (
@@ -20,7 +29,8 @@ if not exist "WinRAR-Activator.ps1" (
     echo  ==========================================================================
     echo.
     pause
-    exit /b 1
+    set "RC=1"
+    endlocal & exit /b %RC%
 )
 
 set "PS_EXEC="
@@ -36,6 +46,5 @@ if %errorlevel% equ 0 (
 )
 
 "%PS_EXEC%" -NoProfile -ExecutionPolicy Bypass -File "WinRAR-Activator.ps1" %*
-
-endlocal
-exit /b %errorlevel%
+set "RC=%errorlevel%"
+endlocal & exit /b %RC%

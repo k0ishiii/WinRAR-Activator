@@ -2,10 +2,10 @@
 
 [CmdletBinding()]
 param(
-    [ValidateSet('Cyan', 'Purple', 'Green', 'Red', 'Yellow')]
-    [string]$Theme = 'Purple',
+    [switch]$NoPause,
 
-    [switch]$NoPause
+    # Internal: used only by the elevated child process to clean up the downloaded temp script.
+    [string]$TempScriptToCleanup = $null
 )
 
 Set-StrictMode -Version Latest
@@ -13,17 +13,13 @@ $ErrorActionPreference = 'Stop'
 $ProgressPreference    = 'SilentlyContinue'
 
 $script:AppTitle   = 'WinRAR Activator'
-$script:AppVersion = 'v2.3'
+$script:AppVersion = 'v2.4'
 $script:Author     = 'k0ishiii'
 $script:Discord    = 'misakisakura3'
 
-switch ($Theme) {
-    'Cyan'   { $script:ColPrimary = 'Cyan';    $script:ColHeader = 'Cyan' }
-    'Green'  { $script:ColPrimary = 'Green';   $script:ColHeader = 'Green' }
-    'Red'    { $script:ColPrimary = 'Red';     $script:ColHeader = 'Red' }
-    'Yellow' { $script:ColPrimary = 'Yellow';  $script:ColHeader = 'Yellow' }
-    Default  { $script:ColPrimary = 'Magenta'; $script:ColHeader = 'Magenta' }
-}
+# Fixed color scheme (Purple theme).
+$script:ColPrimary = 'Magenta'
+$script:ColHeader  = 'Magenta'
 
 try {
     if ($Host.UI.RawUI) {
@@ -66,6 +62,16 @@ function Invoke-Spinner {
         [string]$Message,
         [int]$Seconds = 2
     )
+
+    # When stdout is not an interactive terminal, avoid carriage returns that would
+    # corrupt redirected logs. Emit clean single lines instead.
+    if ([Console]::IsOutputRedirected) {
+        Write-Host ("   [?] {0}..." -f $Message) -ForegroundColor DarkGray
+        Start-Sleep -Seconds $Seconds
+        Write-Host ("   [+] {0}... Completed." -f $Message) -ForegroundColor $script:ColPrimary
+        return
+    }
+
     $frames = @('|', '/', '-', '\')
     $sw = [Diagnostics.Stopwatch]::StartNew()
     $i = 0
@@ -77,7 +83,16 @@ function Invoke-Spinner {
     Write-Host ("`r   [+] {0}... Completed.             " -f $Message) -ForegroundColor $script:ColPrimary
 }
 
+function Clear-TempScript {
+    if ($script:TempScriptToCleanup -and (Test-Path -LiteralPath $script:TempScriptToCleanup)) {
+        try {
+            Remove-Item -LiteralPath $script:TempScriptToCleanup -Force -ErrorAction SilentlyContinue
+        } catch { }
+    }
+}
+
 function Pause-IfInteractive {
+    Clear-TempScript
     if ($NoPause) { exit 0 }
     Write-Host ''
     Write-Host '  ==========================================================================' -ForegroundColor DarkGray
@@ -97,32 +112,75 @@ function Test-Admin {
 
 function Invoke-SelfElevation {
     Write-Warn 'Administrative privileges required. Requesting UAC elevation...'
+
     $psi = New-Object System.Diagnostics.ProcessStartInfo
     $psi.UseShellExecute = $true
     $psi.Verb = 'runas'
     $psi.WindowStyle = [System.Diagnostics.ProcessWindowStyle]::Normal
 
+    $tmpScript = $null
+
     if ($PSCommandPath -and (Test-Path -LiteralPath $PSCommandPath)) {
+        # Local execution: relaunch the exact same script file.
         $psi.FileName = (Get-Process -Id $PID).Path
-        $argList = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ('"{0}"' -f $PSCommandPath), '-Theme', $Theme)
+        $argList = @(
+            '-NoProfile', '-ExecutionPolicy', 'Bypass',
+            '-File', ('"{0}"' -f $PSCommandPath)
+        )
     } else {
-        $psi.FileName = 'pwsh.exe'
-        if (-not (Get-Command 'pwsh.exe' -ErrorAction SilentlyContinue)) {
+        # Remote execution (irm | iex): download to a temp .ps1 so parameters
+        # and the -File invocation are fully honoured by the elevated process.
+        try {
+            $tmpScript = Join-Path $env:TEMP ("WinRAR-Activator-{0}.ps1" -f ([Guid]::NewGuid().ToString('N')))
+            $url = 'https://raw.githubusercontent.com/k0ishiii/WinRAR-Activator/main/WinRAR-Activator.ps1'
+            Invoke-WebRequest -Uri $url -OutFile $tmpScript -UseBasicParsing -ErrorAction Stop
+        } catch {
+            Write-Fail ('Failed to download activator script for elevation: {0}' -f $_.Exception.Message)
+            if ($tmpScript -and (Test-Path -LiteralPath $tmpScript)) {
+                try { Remove-Item -LiteralPath $tmpScript -Force -ErrorAction SilentlyContinue } catch { }
+            }
+            Pause-IfInteractive
+            return
+        }
+
+        if (Get-Command 'pwsh.exe' -ErrorAction SilentlyContinue) {
+            $psi.FileName = 'pwsh.exe'
+        } else {
             $psi.FileName = 'powershell.exe'
         }
-        $argList = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', "irm `"https://raw.githubusercontent.com/k0ishiii/WinRAR-Activator/main/WinRAR-Activator.ps1`" | iex")
+
+        $argList = @(
+            '-NoProfile', '-ExecutionPolicy', 'Bypass',
+            '-File', ('"{0}"' -f $tmpScript),
+            '-TempScriptToCleanup', ('"{0}"' -f $tmpScript)
+        )
     }
 
     if ($NoPause) { $argList += '-NoPause' }
     $psi.Arguments = $argList -join ' '
 
+    # Anti-loop guard: mark current process env so the elevated child can detect
+    # that elevation was already attempted. If the child still reports non-admin,
+    # it will abort instead of spawning another UAC prompt indefinitely.
+    $env:_WINRAR_ACT_ELEVATED = '1'
+    try {
+        $psi.EnvironmentVariables['_WINRAR_ACT_ELEVATED'] = '1'
+    } catch { }
+
     try {
         [void][System.Diagnostics.Process]::Start($psi)
-        [System.Environment]::Exit(0)
     } catch {
         Write-Fail ('UAC elevation failed or denied: {0}' -f $_.Exception.Message)
+        if ($tmpScript -and (Test-Path -LiteralPath $tmpScript)) {
+            try { Remove-Item -LiteralPath $tmpScript -Force -ErrorAction SilentlyContinue } catch { }
+        }
         Pause-IfInteractive
+        return
     }
+
+    # The elevated child now owns the temp script and will delete it on exit
+    # through -TempScriptToCleanup.
+    [System.Environment]::Exit(0)
 }
 
 function Get-OSArchitecture {
@@ -131,16 +189,21 @@ function Get-OSArchitecture {
 
 function Get-PEArchitecture {
     param([string]$FilePath)
+    $stream = $null
+    $reader = $null
     try {
         $stream = [System.IO.File]::OpenRead($FilePath)
         $reader = New-Object System.IO.BinaryReader($stream)
-        if ($reader.ReadUInt16() -ne 0x5A4D) { $stream.Close(); return 'Unknown' }
+
+        if ($reader.ReadUInt16() -ne 0x5A4D) { return 'Unknown' }
+
         $stream.Seek(0x3C, [System.IO.SeekOrigin]::Begin) | Out-Null
         $peOffset = $reader.ReadInt32()
         $stream.Seek($peOffset, [System.IO.SeekOrigin]::Begin) | Out-Null
-        if ($reader.ReadUInt32() -ne 0x00004550) { $stream.Close(); return 'Unknown' }
+
+        if ($reader.ReadUInt32() -ne 0x00004550) { return 'Unknown' }
+
         $machine = $reader.ReadUInt16()
-        $stream.Close()
         switch ($machine) {
             0x014c { return 'x86' }
             0x8664 { return 'x64' }
@@ -149,6 +212,12 @@ function Get-PEArchitecture {
         }
     } catch {
         return 'Unknown'
+    } finally {
+        if ($reader) {
+            try { $reader.Dispose() } catch { }
+        } elseif ($stream) {
+            try { $stream.Dispose() } catch { }
+        }
     }
 }
 
@@ -199,10 +268,22 @@ function Stop-WinRARDeep {
                 Write-Step 'Performing deep termination of active/tray instances...'
                 $terminated = $true
             }
-            $procs | ForEach-Object {
-                try { 
-                    $_.Kill()
-                    $_.WaitForExit(2000) | Out-Null
+            foreach ($p in $procs) {
+                try {
+                    $closed = $false
+                    if ($p.MainWindowHandle -ne 0) {
+                        try { $closed = $p.CloseMainWindow() } catch { $closed = $false }
+                    }
+
+                    if ($closed) {
+                        if (-not $p.WaitForExit(3000)) {
+                            try { $p.Kill() } catch { }
+                            $p.WaitForExit(2000) | Out-Null
+                        }
+                    } else {
+                        try { $p.Kill() } catch { }
+                        $p.WaitForExit(2000) | Out-Null
+                    }
                 } catch { }
             }
         }
@@ -215,24 +296,67 @@ function Stop-WinRARDeep {
 }
 
 function Clear-WinRARCache {
+    # Temp: limit recursion depth so we never traverse unrelated user directories.
     try {
         $tempPath = [System.IO.Path]::GetTempPath()
-        Get-ChildItem -Path $tempPath -Filter 'RarSFX*' -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
-        Get-ChildItem -Path "$env:LocalAppData\VirtualStore" -Recurse -Filter '*WinRAR*' -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+        Get-ChildItem -Path $tempPath -Filter 'RarSFX*' -Depth 1 -ErrorAction SilentlyContinue |
+            Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+    } catch { }
+
+    # VirtualStore: target only the two known WinRAR install locations instead of
+    # recursively walking the whole VirtualStore tree.
+    try {
+        $vsRoot = Join-Path $env:LocalAppData 'VirtualStore'
+        if ($vsRoot -and (Test-Path -LiteralPath $vsRoot)) {
+            $vsTargets = @(
+                (Join-Path $vsRoot 'Program Files\WinRAR'),
+                (Join-Path $vsRoot 'Program Files (x86)\WinRAR')
+            )
+            foreach ($t in $vsTargets) {
+                if ($t -and (Test-Path -LiteralPath $t)) {
+                    try {
+                        Remove-Item -LiteralPath $t -Recurse -Force -ErrorAction SilentlyContinue
+                    } catch { }
+                }
+            }
+        }
     } catch { }
 }
 
 function Start-WinRAR {
     param([string]$Dir)
     $exe = Join-Path $Dir 'WinRAR.exe'
+
+    $proc = $null
     try {
-        Start-Process -FilePath $exe -ErrorAction Stop | Out-Null
-        Write-Ok 'WinRAR process launched.'
-        return $true
+        $proc = Start-Process -FilePath $exe -PassThru -ErrorAction Stop
     } catch {
         Write-Fail ('Failed to start WinRAR: {0}' -f $_.Exception.Message)
         return $false
     }
+
+    try {
+        if (-not $proc.HasExited) {
+            $proc.WaitForInputIdle(10000) | Out-Null
+        }
+    } catch { }
+
+    Start-Sleep -Milliseconds 750
+
+    try {
+        if ($proc.HasExited) {
+            $code = $null
+            try { $code = $proc.ExitCode } catch { }
+            Write-Fail ('WinRAR terminated immediately after launch (exit code: {0}).' -f $code)
+            return $false
+        }
+    } catch {
+        Write-Fail 'Unable to verify WinRAR process state after launch.'
+        return $false
+    }
+
+    Write-Ok 'WinRAR process launched.'
+    return $true
 }
 
 $script:RarRegKey = @"
@@ -300,28 +424,54 @@ function Set-RarRegKey {
         }
     }
 
-    Write-Step 'Applying universal NTFS read-only hardening...'
-    $hardened = $false
+    if (-not (Test-Path -LiteralPath $target -PathType Leaf)) {
+        Write-Fail 'Post-write verification failed: License file missing.'
+        return $false
+    }
+
+    Write-Step 'Applying ReadOnly attribute and NTFS hardening...'
+
+    # --- ReadOnly attribute (independent from ACL) ---
+    $readOnlyOk = $false
     for ($retry = 1; $retry -le 3; $retry++) {
         try {
             Set-ItemProperty -LiteralPath $target -Name Attributes -Value 'ReadOnly' -ErrorAction Stop
-            $acl = Get-Acl -LiteralPath $target
-            $acl.SetAccessRuleProtection($true, $true)
-            $sid = New-Object System.Security.Principal.SecurityIdentifier("S-1-5-32-545")
-            $rule = New-Object System.Security.AccessControl.FileSystemAccessRule($sid, "Write, Delete", "Deny")
-            $acl.AddAccessRule($rule)
-            Set-Acl -LiteralPath $target -AclObject $acl -ErrorAction Stop
-            $hardened = $true
+            $readOnlyOk = $true
             break
         } catch {
             Start-Sleep -Milliseconds 250
         }
     }
 
-    if ($hardened) {
-        Write-Ok 'License protected against unauthorized system modifications.'
+    # --- NTFS ACL hardening (independent from ReadOnly) ---
+    $aclOk = $false
+    $aclError = $null
+    for ($retry = 1; $retry -le 3; $retry++) {
+        try {
+            $acl = Get-Acl -LiteralPath $target
+            $acl.SetAccessRuleProtection($true, $true)
+            $sid = New-Object System.Security.Principal.SecurityIdentifier("S-1-5-32-545")
+            $rule = New-Object System.Security.AccessControl.FileSystemAccessRule($sid, "Write, Delete", "Deny")
+            $acl.AddAccessRule($rule)
+            Set-Acl -LiteralPath $target -AclObject $acl -ErrorAction Stop
+            $aclOk = $true
+            break
+        } catch {
+            $aclError = $_.Exception.Message
+            Start-Sleep -Milliseconds 250
+        }
+    }
+
+    if ($readOnlyOk) {
+        Write-Ok 'ReadOnly file attribute applied successfully.'
     } else {
-        Write-Ok 'License protected with ReadOnly attribute.'
+        Write-Warn 'Failed to apply ReadOnly file attribute.'
+    }
+
+    if ($aclOk) {
+        Write-Ok 'NTFS ACL hardening applied (BUILTIN\Users denied Write/Delete).'
+    } else {
+        Write-Warn ('NTFS ACL hardening not applied (non-NTFS volume or access denied): {0}' -f $aclError)
     }
 
     if (-not (Test-Path -LiteralPath $target -PathType Leaf)) {
@@ -337,6 +487,13 @@ function Invoke-Main {
     Write-Banner
 
     if (-not (Test-Admin)) {
+        # Anti-loop guard: if we already attempted elevation and we are still
+        # not administrators, abort instead of spawning endless UAC prompts.
+        if ($env:_WINRAR_ACT_ELEVATED -eq '1') {
+            Write-Fail 'Elevation was already attempted, but Administrator role still not detected. Aborting to avoid UAC loop.'
+            Pause-IfInteractive
+            return
+        }
         Invoke-SelfElevation
         return
     }
@@ -352,7 +509,7 @@ function Invoke-Main {
     $exePath = Join-Path $rarDir 'WinRAR.exe'
     $osArch  = Get-OSArchitecture
     $rarArch = Get-PEArchitecture -FilePath $exePath
-    
+
     try {
         $verInfo = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($exePath)
         $exactVer = $verInfo.FileVersion
@@ -384,7 +541,7 @@ function Invoke-Main {
 
     Write-Host ''
     Write-Host "  ==========================================================================" -ForegroundColor DarkGray
-    Write-Ok ' ACTIVATION COMPLETED SUCCESSFULLY (v2.3)! Enjoy your registered WinRAR.'
+    Write-Ok ' ACTIVATION COMPLETED SUCCESSFULLY (v2.4)! Enjoy your registered WinRAR.'
     Write-Host "  ==========================================================================" -ForegroundColor DarkGray
     Pause-IfInteractive
 }
