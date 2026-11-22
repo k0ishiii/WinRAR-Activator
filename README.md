@@ -4,7 +4,7 @@
 
 **One command. Permanent registration.**
 
-![Version](https://img.shields.io/badge/version-v2.4.1-purple?style=flat-square)
+![Version](https://img.shields.io/badge/version-v2.4.2-purple?style=flat-square)
 ![PowerShell](https://img.shields.io/badge/powershell-5.1%2B%20%7C%207%2B-blue?style=flat-square&logo=powershell&logoColor=white)
 ![Platform](https://img.shields.io/badge/platform-windows-lightgrey?style=flat-square&logo=windows&logoColor=white)
 ![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)
@@ -32,6 +32,8 @@ For local use, run `Run.bat` from a clone of the repository.
 | **Safe processes** | Graceful close, bounded kill fallback |
 | **License integrity** | Verified before any overwrite |
 | **File hardening** | `ReadOnly` and NTFS ACL applied separately |
+| **Fast-path** | Skips WinRAR restart cycles when activation is already complete |
+| **Explicit exit codes** | `0` success, `1` failure, `2` elevation loop |
 | **Targeted cleanup** | Temp and VirtualStore scoped to WinRAR only |
 | **Remote staging** | Temp `.ps1` for correct parameter forwarding |
 
